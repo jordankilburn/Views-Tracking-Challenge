@@ -7,4 +7,19 @@ List each case below in plain english with it's expected result.
 
 For example...
 Case: user a views user b's recording x for the first time
-Expected Result: etc etc
+Expected Result: recording x uniqueViewCount increases by 1 & user b's uniqueRecordingViewCount increases by 1
+
+Case: user a views user a's recording y for the first time
+Expected Result: recording y uniqueViewCount increases by 1 & user a's uniqueRecordingViewCount increases by 1
+
+Case: user a views user b's recording x for the second (or more) time(s)
+Expected Result: Nothing is changed in the database.
+
+Case: a non-logged in user (no viewerId given) views recording x
+Expected Result: Throws 400 error
+
+Case: user a views a non-existing recording z for the first time
+Expected Result: Nothing is changed since recording z does not exist.
+
+Case: user a views user b's recording x for the first time on two separate devices at the same time
+Expected Result: recording x uniqueViewCount increases by 1 & user b's uniqueRecordingViewCount increases by 1. No double counts.

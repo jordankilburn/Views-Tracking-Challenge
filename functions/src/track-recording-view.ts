@@ -1,61 +1,49 @@
-import * as functions from "firebase-functions";
-import {db} from "./index";
+import { db } from "./index";
+import * as admin from "firebase-admin";
+import { Recording } from "./types";
 
 /* BONUS OPPORTUNITY
 It's not great (it's bad) to throw all of this code in one file.
-Can you help us organize this code better?
+Can you help us organize this code better? ✔️
 */
 
+export async function trackRecordingView(
+  viewerId: string,
+  recordingId: string
+): Promise<void> {
+  //create a ref to the (potential) matching UniqueViews doc
+  const uniqueViewsRef = db
+    .collection("UniqueViews")
+    .where("viewerId", "==", viewerId)
+    .where("recordingId", "==", recordingId);
 
-export interface Recording {
-    id: string; // matches document id in firestore
-    creatorId: string; // id of the user that created this recording
-    uniqueViewCount: number;
-}
+  //use a transaction here to make sure no double view counting even if two requests are made at the same time.
+  await db
+    .runTransaction(async (t): Promise<void> => {
+      /** Query UniqueViews collection and see if an entry for this user & recording exists **/
+      const uniqueViewsSnapshot = await t.get(uniqueViewsRef);
 
-export interface User {
-    id: string; // mathes both the user's document id
-    uniqueRecordingViewCount: number; // sum of all recording views
-}
+      if (!uniqueViewsSnapshot.empty) return; //If it already exists, do nothing.
 
-export enum Collections {
-    Users = "Users",
-    Recordings = "Recordings"
-}
+      //Update the Recording and the User who created the recording
+      const recordingDocRef = db.collection("Recordings").doc(recordingId);
 
-export async function trackRecordingView(viewerId: string, recordingId: string): Promise<void> {
-  // TODO: implement this function
+      //Update the uniqueRecordingViewCount on the User. We will need to get the creatorId first.
+      const recordingDoc = await recordingDocRef.get();
+      if (!recordingDoc.exists) return;
+      const { creatorId } = recordingDoc.data() as Recording;
+      const creatorUserRef = db.collection("Users").doc(creatorId);
 
-  // logs can be viewed in the firebase emulator ui
-  functions.logger.debug("viewerId: ", viewerId);
-  functions.logger.debug("recordingId: ", recordingId);
+      //update both docs
+      t.update(creatorUserRef, {
+        uniqueRecordingViewCount: admin.firestore.FieldValue.increment(1),
+      });
+      t.update(recordingDocRef, {
+        uniqueViewCount: admin.firestore.FieldValue.increment(1),
+      });
 
-
-  // ATTN: the rest of the code in this file is only here to show how firebase works
-
-  // read from a document
-  const documentSnapshot = await db.collection("collection").doc("doc").get();
-  if (documentSnapshot.exists) {
-    const data = documentSnapshot.data();
-    functions.logger.debug("it did exist!", data);
-  } else {
-    functions.logger.debug("it didn't exist");
-  }
-
-  // overwrite a document based on the data you have when sending the write request
-  // set overwrites all existing fields and creates new documents if necessary
-  await db.collection("collection").doc("doc").set({id: "id", field: "foo"});
-  // update will fail if the document exists and will only update fields included
-  // in your update
-  await db.collection("collection").doc("doc").update({id: "id", field: "bar"});
-
-  // update based on data inside the document at the time of the write using a transaction
-  // https://firebase.google.com/docs/firestore/manage-data/transactions#web-version-9
-
-  await db.runTransaction(async (t): Promise<void> => {
-    const ref = db.collection("collection").doc("doc");
-    const docSnapshot = await t.get(ref);
-    // do something with the data
-    t.set(ref, {id: "id", field: "foobar"});
-  });
+      //Add a doc to UniqueViews to ensure this view is only counted once.
+      t.set(db.collection("UniqueViews").doc(), { viewerId, recordingId });
+    })
+    .catch((err) => console.log("Error:", err));
 }
